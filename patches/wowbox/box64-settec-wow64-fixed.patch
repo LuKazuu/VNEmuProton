@@ -408,7 +408,7 @@ index 7ee9fe474..5fdc162ac 100644
 +        IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)((BYTE*)inst + dos->e_lfanew);
 +        wowbox64_module = inst;
 +        wowbox64_image_size = nt->OptionalHeader.SizeOfImage;
-+        LdrDisableThreadCallbacksForDll(inst);
++        LdrDisableThreadCalloutsForDll(inst);
 +    }
      return TRUE;
  }
