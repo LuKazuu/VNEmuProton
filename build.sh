@@ -103,6 +103,15 @@ _setup_llvm_mingw_toolchain() {
 
 termux_step_host_build() {
         _setup_llvm_mingw_toolchain
+
+        # The proton_11.0 branch doesn't ship a pre-generated configure script.
+        # Run autogen.sh to generate it (same as proton-native's flow —
+        # autogen.sh runs tools/make_requests, tools/make_specfiles,
+        # dlls/winevulkan/make_vulkan, then autoreconf -ifv).
+        if [ ! -f "$TERMUX_PKG_SRCDIR/configure" ]; then
+                (cd "$TERMUX_PKG_SRCDIR" && bash autogen.sh)
+        fi
+
         "$TERMUX_PKG_SRCDIR/configure" ${TERMUX_PKG_EXTRA_HOSTBUILD_CONFIGURE_ARGS}
         make -j "$TERMUX_PKG_MAKE_PROCESSES" __tooldeps__ nls/all
 }
