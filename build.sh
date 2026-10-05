@@ -120,8 +120,13 @@ termux_step_pre_configure() {
         _setup_llvm_mingw_toolchain
 
         # Patches are auto-applied by the Termux package builder (patch -p1,
-        # alphabetical order) BEFORE this function runs. No manual patch
-        # application needed here — same as VNEmuWine.
+        # alphabetical order) BEFORE this function runs. The .beforehostbuild
+        # patches were applied before termux_step_host_build, which ran
+        # autogen.sh. But the regular .patch files (including
+        # server_protocol_def.patch which adds the ESYNC enum) are applied
+        # AFTER the host build. So we need to re-run autogen.sh here to
+        # regenerate server_protocol.h with the ESYNC enum.
+        (cd "$TERMUX_PKG_SRCDIR" && bash autogen.sh)
 
         # Strip Termux's hardening flags (matches upstream behaviour).
         CPPFLAGS="${CPPFLAGS/-Oz/}"
