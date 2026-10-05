@@ -143,8 +143,9 @@ termux_step_pre_configure() {
         local _balanced_flags="-Oz -g1 -fno-lto -ffunction-sections -fdata-sections -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES -Wno-declaration-after-statement -Wno-implicit-function-declaration -Wno-int-conversion"
         CFLAGS+=" $_balanced_flags"
         CXXFLAGS+=" $_balanced_flags"
-        # PE cross-compile side: no -D or -Wno flags (not Android ELF).
-        export CROSSCFLAGS="${CROSSCFLAGS:-} -Oz -g1 -fno-lto -ffunction-sections -fdata-sections"
+        # PE cross-compile side: same -Wno flags as ELF side — proton_11.0's
+        # sqlite3.c calls _ReadWriteBarrier() which is undeclared under clang.
+        export CROSSCFLAGS="${CROSSCFLAGS:-} -Oz -g1 -fno-lto -ffunction-sections -fdata-sections -Wno-implicit-function-declaration"
         export CROSSLDFLAGS="${CROSSLDFLAGS:-}"
 
         LDFLAGS+=" -landroid-spawn"
