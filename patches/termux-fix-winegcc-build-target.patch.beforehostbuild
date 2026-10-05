@@ -1,6 +1,8 @@
+diff --git a/tools/winegcc/winegcc.c b/tools/winegcc/winegcc.c
+index f865180..820d732 100644
 --- a/tools/winegcc/winegcc.c
 +++ b/tools/winegcc/winegcc.c
-@@ -428,9 +428,19 @@ static struct strarray build_tool_name( const char *target_name, struct tool_name
+@@ -429,10 +429,20 @@ static struct strarray build_tool_name( const char *target_name, struct tool_nam
      ret = strarray_fromstring( path, " " );
      if (!strncmp( tool.llvm_base, "clang", 5 ))
      {

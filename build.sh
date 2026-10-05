@@ -110,52 +110,9 @@ termux_step_host_build() {
 termux_step_pre_configure() {
         _setup_llvm_mingw_toolchain
 
-        # Apply patches in order. Minimal set — matches VNEmuWine's approach.
-        # Only includes patches that VNEmuWine has (or their proton_11.0 equivalents).
-        local _patches=(
-                termux-fix-paths.patch
-                termux-fix-socket-ipx.patch
-                fix-anon-mmap-alloc-align.patch
-                wine-fast-yield.patch
-                dlls_ntdll_unix_esync_c.patch
-                dlls_ntdll_unix_esync_h.patch
-                server_esync_c.patch
-                server_esync_h.patch
-                server_protocol_def.patch
-                server_main_c.patch
-                dlls_ntdll_makefile_in.patch
-                dlls_ntdll_unix_sync_c.patch
-                server_makefile_in.patch
-                server_inproc_sync_c.patch
-                server_thread_c.patch
-                dlls_ntdll_unix_virtual_c.patch
-                dlls_ntdll_loader_c.patch
-                dlls_ntdll_unix_loader_c.patch
-                programs_wineboot_wineboot_c.patch
-                dlls_winepulse_drv_pulse_c.patch
-                dlls_opengl32_unix_wgl_c.patch
-                opengl32-wow64-vk-buffer-storage-fallback.patch
-                dlls_ntdll_unix_server_c.patch
-                dlls_ntdll_unix_env_c.patch
-                dlls_shell32_shlfileop_c.patch
-                ddraw-gdi-fallback.patch
-                mfplat-dxgi-fix.patch
-                wma-audio-fix.patch
-                wmvcore-stream-config-get-stream-name.patch
-                termux-fix-winebuild-as-type.patch.beforehostbuild
-                termux-fix-winegcc-build-target.patch.beforehostbuild
-        )
-        for _p in "${_patches[@]}"; do
-                if git apply --check "patches/$_p" 2>/dev/null; then
-                        git apply "patches/$_p"
-                elif git apply --check --reverse "patches/$_p" 2>/dev/null; then
-                        : # already applied
-                else
-                        echo "FATAL: patch failed: patches/$_p" >&2
-                        git apply --check "patches/$_p" >&2 || true
-                        exit 1
-                fi
-        done
+        # Patches are auto-applied by the Termux package builder (patch -p1,
+        # alphabetical order) BEFORE this function runs. No manual patch
+        # application needed here — same as VNEmuWine.
 
         # Strip Termux's hardening flags (matches upstream behaviour).
         CPPFLAGS="${CPPFLAGS/-Oz/}"
@@ -195,35 +152,30 @@ EOF
 }
 
 termux_step_post_make_install() {
-        # Install the FEX + box64 wow64 DLLs (libarm64ecfex.dll, libwow64fex.dll,
-        # wowbox64.dll). These are prebuilt by the GitHub Actions workflow
-        # (build-fexcore + build-box64 jobs) and dropped into fex-dlls/ next
-        # to build.sh. Same as VNEmuWine.
         local _dll_dir="${TERMUX_PKG_BUILDER_DIR}/fex-dlls"
-        if [ -d "$_dll_dir" ]; then
-                local _dll
-                for _dll in wowbox64.dll libwow64fex.dll libarm64ecfex.dll; do
-                        if [ -f "$_dll_dir/$_dll" ]; then
-                                install -Dm644 "$_dll_dir/$_dll" \
-                                        "$TERMUX_PREFIX"/opt/proton-termux/lib/wine/aarch64-windows/$_dll
-                        else
-                                echo "WARNING: $_dll not found in fex-dlls/" >&2
-                        fi
-                done
-        else
-                echo "WARNING: fex-dlls/ directory not found — building without FEX/box64 DLLs" >&2
+        if [ ! -d "$_dll_dir" ]; then
+                echo "ERROR: $_dll_dir does not exist" >&2; exit 1
         fi
-
+        local _dll
+        for _dll in wowbox64.dll libwow64fex.dll libarm64ecfex.dll; do
+                if [ -f "$_dll_dir/$_dll" ]; then
+                        install -Dm644 "$_dll_dir/$_dll" \
+                                "$TERMUX_PREFIX"/opt/proton-termux/lib/wine/aarch64-windows/$_dll
+                else
+                        echo "ERROR: $_dll not found" >&2; exit 1
+                fi
+        done
         mkdir -p "$TERMUX_PREFIX"/share/doc/proton-termux \
                  "$TERMUX_PREFIX"/share/doc/proton-termux-libarm64ecfex \
                  "$TERMUX_PREFIX"/share/doc/proton-termux-libwow64fex \
                  "$TERMUX_PREFIX"/share/doc/proton-termux-wowbox64
-        cp "$TERMUX_PKG_SRCDIR/LICENSE" "$TERMUX_PREFIX"/share/doc/proton-termux/copyright 2>/dev/null || true
-        curl -sL "https://raw.githubusercontent.com/FEX-Emu/FEX/main/LICENSE" -o "$TERMUX_PREFIX"/share/doc/proton-termux-libarm64ecfex/copyright 2>/dev/null || true
-        cp "$TERMUX_PREFIX"/share/doc/proton-termux-libarm64ecfex/copyright "$TERMUX_PREFIX"/share/doc/proton-termux-libwow64fex/copyright 2>/dev/null || true
-        curl -sL "https://raw.githubusercontent.com/ptitSeb/box64/main/LICENSE" -o "$TERMUX_PREFIX"/share/doc/proton-termux-wowbox64/copyright 2>/dev/null || true
+        cp "$TERMUX_PKG_SRCDIR/LICENSE" "$TERMUX_PREFIX"/share/doc/proton-termux/copyright
+        curl -L "https://raw.githubusercontent.com/FEX-Emu/FEX/main/LICENSE" -o "$TERMUX_PREFIX"/share/doc/proton-termux-libarm64ecfex/copyright
+        cp "$TERMUX_PREFIX"/share/doc/proton-termux-libarm64ecfex/copyright "$TERMUX_PREFIX"/share/doc/proton-termux-libwow64fex/copyright
+        curl -L "https://raw.githubusercontent.com/ptitSeb/box64/main/LICENSE" -o "$TERMUX_PREFIX"/share/doc/proton-termux-wowbox64/copyright
 
-        # Delete dev artifacts; keep .symtab + .debug_line for backtraces.
+        echo "Removing dev artifacts (static libs, headers, man pages)..."
         find "$TERMUX_PREFIX/opt/proton-termux" -type f \( -name "*.a" -o -name "*.lib" -o -name "*.def" \) -delete
         rm -rf "$TERMUX_PREFIX/opt/proton-termux/include" "$TERMUX_PREFIX/opt/proton-termux/share/man"
+        echo "Balanced install complete (no strip, -Oz -g1, full perf)."
 }

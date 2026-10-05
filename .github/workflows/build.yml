@@ -309,24 +309,20 @@ jobs:
           wget -q "https://github.com/ValveSoftware/wine/archive/refs/heads/proton_11.0.tar.gz" -O /tmp/wine.tar.gz
           echo "wine_sha=$(sha256sum /tmp/wine.tar.gz | cut -d' ' -f1)" >> "$GITHUB_ENV"
 
-      - name: Verify wine patches (same order as build.sh _patches array)
+      - name: Verify wine patches (alphabetical order, patch -p1 — matches Termux builder)
         run: |
           mkdir -p /tmp/wine-source && tar -xzf /tmp/wine.tar.gz -C /tmp/wine-source --strip-components=1
-          cd /tmp/wine-source && git init -q && git add -A && git -c user.email=ci@local -c user.name=ci commit -q -m init
-          # Extract patch order from build.sh's _patches=(...) array
-          PATCHES=$(sed -n '/_patches=(/,/)/p' "$GITHUB_WORKSPACE/build.sh" \
-                    | grep -oE '[a-z0-9_-]+\.patch(\.beforehostbuild)?')
           FAILED=0; PASSED=0
-          for patch in $PATCHES; do
-            p="$GITHUB_WORKSPACE/patches/$patch"
-            if git apply --check "$p" 2>/dev/null; then
-              git apply "$p"
-              echo "  OK    $patch"; PASSED=$((PASSED+1))
-            elif git apply --check --reverse "$p" 2>/dev/null; then
-              echo "  SKIP  $patch (already applied)"; PASSED=$((PASSED+1))
+          # Termux builder applies patches in alphabetical order using patch -p1.
+          # .beforehostbuild patches are applied first (before host build),
+          # then regular .patch files (before cross-configure).
+          for patch in $(ls "$GITHUB_WORKSPACE"/patches/*.patch.beforehostbuild "$GITHUB_WORKSPACE"/patches/*.patch 2>/dev/null | sort); do
+            if patch --dry-run -p1 -F0 --no-backup-if-mismatch -d /tmp/wine-source < "$patch" >/tmp/p.log 2>&1; then
+              patch -p1 -F0 --no-backup-if-mismatch -d /tmp/wine-source < "$patch"
+              echo "  OK    $(basename "$patch")"; PASSED=$((PASSED+1))
             else
-              echo "  FAIL  $patch"; FAILED=$((FAILED+1))
-              git apply --check "$p" 2>&1 | sed 's/^/        /'
+              echo "  FAIL  $(basename "$patch")"; FAILED=$((FAILED+1))
+              cat /tmp/p.log | sed 's/^/        /'
             fi
           done
           echo "$PASSED passed, $FAILED failed"
@@ -338,7 +334,8 @@ jobs:
       - name: Install our files
         run: |
           PKG_DIR="termux-packages/x11-packages/proton-termux"
-          rm -fv $PKG_DIR/*.patch $PKG_DIR/*.patch.beforehostbuild $PKG_DIR/build.sh
+          mkdir -p "$PKG_DIR"
+          rm -fv $PKG_DIR/*.patch $PKG_DIR/*.patch.beforehostbuild $PKG_DIR/build.sh 2>/dev/null || true
           cp -v build.sh "$PKG_DIR/build.sh"
           for p in patches/*.patch patches/*.patch.beforehostbuild; do
             [ -f "$p" ] && cp -v "$p" "$PKG_DIR/$(basename "$p")"
