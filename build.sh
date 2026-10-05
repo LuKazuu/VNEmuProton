@@ -1,0 +1,229 @@
+# build.sh — Termux package recipe for VNEmuProton (Proton 11.0 for Termux)
+#
+# Same build flow and flags as LuKazuu/VNEmuWine, but built from
+# ValveSoftware/wine proton_11.0 with the proton-native patch overlay.
+TERMUX_PKG_HOMEPAGE=https://github.com/ValveSoftware/Proton
+TERMUX_PKG_DESCRIPTION="VNEmuProton — Valve Proton 11.0 (Wine fork) for Termux"
+TERMUX_PKG_LICENSE="LGPL-2.1"
+TERMUX_PKG_MAINTAINER="@LuKazuu"
+TERMUX_PKG_VERSION="11.0"
+TERMUX_PKG_REVISION=1
+TERMUX_PKG_SRCURL="https://github.com/ValveSoftware/wine/archive/refs/heads/proton_11.0.tar.gz"
+TERMUX_PKG_SHA256="__PROTON_SHA256__"
+TERMUX_PKG_DEPENDS="alsa-lib, alsa-plugins, fontconfig, freetype, krb5, libandroid-spawn, libc++, libgmp, libgnutls, libxcb, libxcomposite, libxcursor, libxfixes, libxrender, opengl, pulseaudio, sdl2, vulkan-loader, xorg-xrandr"
+TERMUX_PKG_BUILD_DEPENDS="libandroid-spawn-static, vulkan-loader-generic"
+TERMUX_PKG_ANTI_BUILD_DEPENDS="vulkan-loader"
+TERMUX_PKG_NO_STATICSPLIT=true
+TERMUX_PKG_AUTO_UPDATE=false
+TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
+TERMUX_PKG_HOSTBUILD=true
+TERMUX_PKG_EXTRA_HOSTBUILD_CONFIGURE_ARGS="
+--without-x
+--disable-tests
+"
+TERMUX_PKG_EXTRA_CONFIGURE_ARGS="
+ac_cv_header_linux_userfaultfd_h=no
+ac_cv_header_linux_ntsync_h=no
+ac_cv_header_sys_eventfd_h=yes
+ac_cv_path_GRADLE=no
+enable_wineandroid_drv=no
+enable_tools=yes
+enable_amd_ags_x64=no
+--prefix=$TERMUX_PREFIX/opt/proton-termux
+--exec-prefix=$TERMUX_PREFIX/opt/proton-termux
+--includedir=$TERMUX_PREFIX/opt/proton-termux/include
+--libdir=$TERMUX_PREFIX/opt/proton-termux/lib
+--with-wine-tools=$TERMUX_PKG_HOSTBUILD_DIR
+--enable-nls
+--disable-tests
+--with-alsa
+--without-capi
+--without-coreaudio
+--without-cups
+--without-dbus
+--with-ffmpeg
+--with-fontconfig
+--with-freetype
+--with-gettext
+--with-gettextpo=no
+--without-gphoto
+--with-gnutls
+--without-gssapi
+--with-gstreamer
+--without-inotify
+--without-krb5
+--with-mingw=clang
+--without-netapi
+--without-opencl
+--with-opengl
+--without-osmesa
+--without-oss
+--without-pcap
+--without-pcsclite
+--without-piper
+--with-pthread
+--with-pulse
+--without-sane
+--with-sdl
+--without-udev
+--without-unwind
+--without-usb
+--without-v4l2
+--without-vosk
+--with-vulkan
+--without-wayland
+--without-xcomposite
+--without-xfixes
+--without-xinerama
+--with-xinput
+--with-xinput2
+--with-xrandr
+--with-xrender
+--without-xshape
+--without-xshm
+--without-xxf86vm
+--enable-archs=i386,aarch64,arm64ec
+"
+
+_setup_llvm_mingw_toolchain() {
+        local _llvm_mingw_version=21
+        local _version="20250319"
+        local _url="https://github.com/mstorsjo/llvm-mingw/releases/download/$_version/llvm-mingw-$_version-ucrt-ubuntu-20.04-x86_64.tar.xz"
+        local _path="$TERMUX_PKG_CACHEDIR/$(basename $_url)"
+        local _sha256sum=ab2a1489416fa82b3e85e88cb877053ee8a591993408caf076737d8de5ae72ca
+        termux_download $_url $_path $_sha256sum
+        local _extract_path="$TERMUX_PKG_CACHEDIR/llvm-mingw-toolchain-$_llvm_mingw_version"
+        if [ ! -d "$_extract_path" ]; then
+                mkdir -p "$_extract_path"-tmp
+                tar -C "$_extract_path"-tmp --strip-component=1 -xf "$_path"
+                mv "$_extract_path"-tmp "$_extract_path"
+        fi
+        export PATH="$_extract_path/bin:$PATH"
+}
+
+termux_step_host_build() {
+        _setup_llvm_mingw_toolchain
+        "$TERMUX_PKG_SRCDIR/configure" ${TERMUX_PKG_EXTRA_HOSTBUILD_CONFIGURE_ARGS}
+        make -j "$TERMUX_PKG_MAKE_PROCESSES" __tooldeps__ nls/all
+}
+
+termux_step_pre_configure() {
+        _setup_llvm_mingw_toolchain
+
+        # Apply patches in order. Minimal set — matches VNEmuWine's approach.
+        # Only includes patches that VNEmuWine has (or their proton_11.0 equivalents).
+        local _patches=(
+                termux-fix-paths.patch
+                termux-fix-socket-ipx.patch
+                fix-anon-mmap-alloc-align.patch
+                wine-fast-yield.patch
+                dlls_ntdll_unix_esync_c.patch
+                dlls_ntdll_unix_esync_h.patch
+                server_esync_c.patch
+                server_esync_h.patch
+                server_protocol_def.patch
+                server_main_c.patch
+                dlls_ntdll_makefile_in.patch
+                dlls_ntdll_unix_sync_c.patch
+                server_makefile_in.patch
+                server_inproc_sync_c.patch
+                server_thread_c.patch
+                dlls_ntdll_unix_virtual_c.patch
+                dlls_ntdll_loader_c.patch
+                dlls_ntdll_unix_loader_c.patch
+                programs_wineboot_wineboot_c.patch
+                dlls_winepulse_drv_pulse_c.patch
+                dlls_opengl32_unix_wgl_c.patch
+                opengl32-wow64-vk-buffer-storage-fallback.patch
+                dlls_ntdll_unix_server_c.patch
+                dlls_ntdll_unix_env_c.patch
+                dlls_shell32_shlfileop_c.patch
+                ddraw-gdi-fallback.patch
+                mfplat-dxgi-fix.patch
+                wma-audio-fix.patch
+                wmvcore-stream-config-get-stream-name.patch
+                termux-fix-winebuild-as-type.patch.beforehostbuild
+                termux-fix-winegcc-build-target.patch.beforehostbuild
+        )
+        for _p in "${_patches[@]}"; do
+                if git apply --check "patches/$_p" 2>/dev/null; then
+                        git apply "patches/$_p"
+                elif git apply --check --reverse "patches/$_p" 2>/dev/null; then
+                        : # already applied
+                else
+                        echo "FATAL: patch failed: patches/$_p" >&2
+                        git apply --check "patches/$_p" >&2 || true
+                        exit 1
+                fi
+        done
+
+        # Strip Termux's hardening flags (matches upstream behaviour).
+        CPPFLAGS="${CPPFLAGS/-Oz/}"
+        CFLAGS="${CFLAGS/-Oz/}"
+        CXXFLAGS="${CXXFLAGS/-Oz/}"
+        CPPFLAGS="${CPPFLAGS/-fstack-protector-strong/}"
+        CFLAGS="${CFLAGS/-fstack-protector-strong/}"
+        CXXFLAGS="${CXXFLAGS/-fstack-protector-strong/}"
+        LDFLAGS="${LDFLAGS/-Wl,-z,relro,-z,now/}"
+
+        # Balanced-debug: -Oz for size/perf, -g1 for line-table backtraces.
+        # -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES: 16KB page support (Android 15+).
+        # -Wno-* : suppress warnings-as-errors from patched code patterns.
+        local _balanced_flags="-Oz -g1 -fno-lto -ffunction-sections -fdata-sections -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES -Wno-declaration-after-statement -Wno-implicit-function-declaration -Wno-int-conversion"
+        CFLAGS+=" $_balanced_flags"
+        CXXFLAGS+=" $_balanced_flags"
+        # PE cross-compile side: no -D or -Wno flags (not Android ELF).
+        export CROSSCFLAGS="${CROSSCFLAGS:-} -Oz -g1 -fno-lto -ffunction-sections -fdata-sections"
+        export CROSSLDFLAGS="${CROSSLDFLAGS:-}"
+
+        LDFLAGS+=" -landroid-spawn"
+        LDFLAGS+=" -Wl,-z,max-page-size=16384 -Wl,--rosegment -Wl,--gc-sections -Wl,--icf=safe"
+}
+
+termux_step_make() {
+        make -j $TERMUX_PKG_MAKE_PROCESSES
+}
+
+termux_step_make_install() {
+        make -j $TERMUX_PKG_MAKE_PROCESSES install
+        mkdir -p $TERMUX_PREFIX/bin
+        cat << EOF > $TERMUX_PREFIX/bin/proton-termux
+#!$TERMUX_PREFIX/bin/env sh
+exec $TERMUX_PREFIX/opt/proton-termux/bin/wine "\$@"
+EOF
+        chmod +x $TERMUX_PREFIX/bin/proton-termux
+}
+
+termux_step_post_make_install() {
+        # Install the FEX + box64 wow64 DLLs (libarm64ecfex.dll, libwow64fex.dll,
+        # wowbox64.dll). These are prebuilt by the GitHub Actions workflow
+        # (build-fexcore + build-box64 jobs) and dropped into fex-dlls/ next
+        # to build.sh. Same as VNEmuWine.
+        local _dll_dir="${TERMUX_PKG_BUILDER_DIR}/fex-dlls"
+        if [ -d "$_dll_dir" ]; then
+                local _dll
+                for _dll in wowbox64.dll libwow64fex.dll libarm64ecfex.dll; do
+                        if [ -f "$_dll_dir/$_dll" ]; then
+                                install -Dm644 "$_dll_dir/$_dll" \
+                                        "$TERMUX_PREFIX"/opt/proton-termux/lib/wine/aarch64-windows/$_dll
+                        else
+                                echo "WARNING: $_dll not found in fex-dlls/" >&2
+                        fi
+                done
+        else
+                echo "WARNING: fex-dlls/ directory not found — building without FEX/box64 DLLs" >&2
+        fi
+
+        mkdir -p "$TERMUX_PREFIX"/share/doc/proton-termux \
+                 "$TERMUX_PREFIX"/share/doc/proton-termux-libarm64ecfex \
+                 "$TERMUX_PREFIX"/share/doc/proton-termux-libwow64fex \
+                 "$TERMUX_PREFIX"/share/doc/proton-termux-wowbox64
+        cp "$TERMUX_PKG_SRCDIR/LICENSE" "$TERMUX_PREFIX"/share/doc/proton-termux/copyright 2>/dev/null || true
+        curl -sL "https://raw.githubusercontent.com/FEX-Emu/FEX/main/LICENSE" -o "$TERMUX_PREFIX"/share/doc/proton-termux-libarm64ecfex/copyright 2>/dev/null || true
+        cp "$TERMUX_PREFIX"/share/doc/proton-termux-libarm64ecfex/copyright "$TERMUX_PREFIX"/share/doc/proton-termux-libwow64fex/copyright 2>/dev/null || true
+        curl -sL "https://raw.githubusercontent.com/ptitSeb/box64/main/LICENSE" -o "$TERMUX_PREFIX"/share/doc/proton-termux-wowbox64/copyright 2>/dev/null || true
+
+        # Delete dev artifacts; keep .symtab + .debug_line for backtraces.
+        find "$TERMUX_PREFIX/opt/proton-termux" -type f \( -name "*.a" -o -name "*.lib" -o -name "*.def" \) -delete
+        rm -rf "$TERMUX_PREFIX/opt/proton-termux/include" "$TERMUX_PREFIX/opt/proton-termux/share/man"
+}

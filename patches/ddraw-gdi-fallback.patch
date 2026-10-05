@@ -1,0 +1,88 @@
+diff --git a/dlls/ddraw/surface.c b/dlls/ddraw/surface.c
+index dc811bf..a5bc8f1 100644
+--- a/dlls/ddraw/surface.c
++++ b/dlls/ddraw/surface.c
+@@ -66,6 +66,17 @@ static BOOL ddraw_gdi_is_front(struct ddraw *ddraw)
+     return surface->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE;
+ }
+ 
++/* When WINE_DDRAW_GDI_FALLBACK is set, ddraw_surface_update_frontbuffer()
++ * skips the wined3d blit path (which blits to WINED3D_LOCATION_DRAWABLE via
++ * glBlitFramebuffer) and always uses the GDI BitBlt fallback instead. This
++ * is needed on stacks where blitting to the default framebuffer is
++ * unreliable, e.g. zink over a Turnip wrapper without DRI3 on Termux-X11. */
++static BOOL ddraw_use_gdi_fallback(void)
++{
++    const char *value = getenv("WINE_DDRAW_GDI_FALLBACK");
++    return value && value[0] && value[0] != '0';
++}
++
+ /* This is slow, of course. Also, in case of locks, we can't prevent other
+  * applications from drawing to the screen while we've locked the frontbuffer.
+  * We'd like to do this in wined3d instead, but for that to work wined3d needs
+@@ -77,7 +88,7 @@ HRESULT ddraw_surface_update_frontbuffer(struct ddraw_surface *surface,
+     struct ddraw *ddraw = surface->ddraw;
+     HDC surface_dc, screen_dc;
+     HWND dest_window = NULL;
+-    int x, y, w, h;
++    int x, y, w, h, dst_x, dst_y;
+     HRESULT hr;
+     BOOL ret;
+     RECT r;
+@@ -144,7 +155,14 @@ HRESULT ddraw_surface_update_frontbuffer(struct ddraw_surface *surface,
+      * frame, which means that the GDI drawing can only work correctly 50% of
+      * the time. Testing the game Windows 98 shows this exact behaviour; the
+      * buttons often fail to highlight correctly when you mouse over them. */
+-    if (ddraw->swapchain_window && (!(ddraw->cooperative_level & DDSCL_EXCLUSIVE)
++    if (ddraw_use_gdi_fallback())
++    {
++        static unsigned int once;
++        if (!once++)
++            FIXME("WINE_DDRAW_GDI_FALLBACK is enabled; using GDI BitBlt "
++                    "for primary surface updates.\n");
++    }
++    else if (ddraw->swapchain_window && (!(ddraw->cooperative_level & DDSCL_EXCLUSIVE)
+             || ddraw->swapchain_window == GetForegroundWindow() || ddraw_gdi_is_front(ddraw)))
+     {
+         /* Nothing to do, we control the frontbuffer, or at least the parts we
+@@ -178,20 +196,36 @@ HRESULT ddraw_surface_update_frontbuffer(struct ddraw_surface *surface,
+     if (surface->palette)
+         wined3d_palette_apply_to_dc(surface->palette->wined3d_palette, surface_dc);
+ 
+-    if (ddraw->cooperative_level & DDSCL_EXCLUSIVE && ddraw->dest_window)
++    if (ddraw_use_gdi_fallback() && ddraw->swapchain_window)
++        dest_window = ddraw->swapchain_window;
++    else if (ddraw->cooperative_level & DDSCL_EXCLUSIVE && ddraw->dest_window)
+         dest_window = ddraw->dest_window;
++
+     if (!(screen_dc = GetDCEx(dest_window, NULL, DCX_WINDOW | DCX_CACHE)))
+     {
+         wined3d_texture_release_dc(wined3d_texture, surface->sub_resource_idx, surface_dc);
+-        ERR("Failed to get screen DC.\n");
++        ERR("Failed to get %s DC.\n", dest_window ? "window" : "screen");
+         return E_FAIL;
+     }
+ 
++    if (ddraw->swapchain_window && dest_window == ddraw->swapchain_window)
++    {
++        POINT offset = {0, 0};
++        ScreenToClient(ddraw->swapchain_window, &offset);
++        dst_x = x + offset.x;
++        dst_y = y + offset.y;
++    }
++    else
++    {
++        dst_x = x;
++        dst_y = y;
++    }
++
+     if (read)
+         ret = BitBlt(surface_dc, x, y, w, h,
+-                screen_dc, x, y, SRCCOPY);
++                screen_dc, dst_x, dst_y, SRCCOPY);
+     else
+-        ret = BitBlt(screen_dc, x, y, w, h,
++        ret = BitBlt(screen_dc, dst_x, dst_y, w, h,
+                 surface_dc, x, y, SRCCOPY);
+ 
+     ReleaseDC(dest_window, screen_dc);

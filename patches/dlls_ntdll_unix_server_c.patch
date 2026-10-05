@@ -1,0 +1,16 @@
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index 6962301..b6d092b 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1704,6 +1704,11 @@ size_t server_init_process(void)
+                 inproc_device_fd = FSYNC_USED_BY_SERVER;
+                 fsync_init( pid );
+             }
++            else if (reply->inproc_device == ESYNC_USED_BY_SERVER)
++            {
++                int shm_fd = wine_server_receive_fd( &handle );
++                esync_init( shm_fd );
++            }
+             else if (reply->inproc_device)
+             {
+                 inproc_device_fd = wine_server_receive_fd( &handle );
