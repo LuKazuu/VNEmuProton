@@ -72,8 +72,9 @@ enable_amd_ags_x64=no
 --without-vosk
 --with-vulkan
 --without-wayland
---without-xcomposite
---without-xfixes
+--with-xcomposite
+--with-xcursor
+--with-xfixes
 --without-xinerama
 --with-xinput
 --with-xinput2
@@ -101,6 +102,16 @@ _setup_llvm_mingw_toolchain() {
         export PATH="$_extract_path/bin:$PATH"
 }
 
+termux_step_post_get_source() {
+        # Copy android/shm_utils/ into the source tree right after extraction.
+        # The FSYNC patches include "../../../android/shm_utils/shm_utils.h" from
+        # dlls/ntdll/unix/fsync.c and server/fsync.c. This needs to be in the
+        # source tree BEFORE any configure/makedep runs (both host and cross).
+        if [ -d "${TERMUX_PKG_BUILDER_DIR}/android" ]; then
+                cp -r "${TERMUX_PKG_BUILDER_DIR}/android" "$TERMUX_PKG_SRCDIR/"
+        fi
+}
+
 termux_step_host_build() {
         _setup_llvm_mingw_toolchain
 
@@ -118,15 +129,6 @@ termux_step_host_build() {
 
 termux_step_pre_configure() {
         _setup_llvm_mingw_toolchain
-
-        # Copy android/shm_utils/ into the source tree — the FSYNC patches
-        # include "../../../android/shm_utils/shm_utils.h" from
-        # dlls/ntdll/unix/fsync.c and server/fsync.c.
-        # proton-native's CI does: cp -r proton-wine-p11/android wine-src/
-        # We do the same here from the builder dir.
-        if [ -d "${TERMUX_PKG_BUILDER_DIR}/android" ]; then
-                cp -r "${TERMUX_PKG_BUILDER_DIR}/android" "$TERMUX_PKG_SRCDIR/"
-        fi
 
         # Patches are auto-applied by the Termux package builder (patch -p1,
         # alphabetical order) BEFORE this function runs. The .beforehostbuild
