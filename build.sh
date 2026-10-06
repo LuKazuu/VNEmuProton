@@ -119,6 +119,15 @@ termux_step_host_build() {
 termux_step_pre_configure() {
         _setup_llvm_mingw_toolchain
 
+        # Copy android/shm_utils/ into the source tree — the FSYNC patches
+        # include "../../../android/shm_utils/shm_utils.h" from
+        # dlls/ntdll/unix/fsync.c and server/fsync.c.
+        # proton-native's CI does: cp -r proton-wine-p11/android wine-src/
+        # We do the same here from the builder dir.
+        if [ -d "${TERMUX_PKG_BUILDER_DIR}/android" ]; then
+                cp -r "${TERMUX_PKG_BUILDER_DIR}/android" "$TERMUX_PKG_SRCDIR/"
+        fi
+
         # Patches are auto-applied by the Termux package builder (patch -p1,
         # alphabetical order) BEFORE this function runs. The .beforehostbuild
         # patches were applied before termux_step_host_build, which ran
