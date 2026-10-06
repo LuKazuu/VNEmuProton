@@ -1,0 +1,68 @@
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index 36c36ac..65f458c 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -4473,11 +4473,29 @@ static void load_arm64ec_module(void)
+     KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+     UNICODE_STRING nameW = RTL_CONSTANT_STRING( L"\\Registry\\Machine\\Software\\Microsoft\\Wow64\\amd64" );
+     WCHAR module[64] = L"C:\\windows\\system32\\libarm64ecfex.dll";
++    WCHAR cpu_dll[64];
+     OBJECT_ATTRIBUTES attr;
+     WINE_MODREF *wm;
+     NTSTATUS status;
+     HANDLE key;
+ 
++    /* HODLL64 env var: override 64-bit arm64ec CPU DLL at runtime */
++    {
++        UNICODE_STRING hodll64 = RTL_CONSTANT_STRING( L"HODLL64" );
++        UNICODE_STRING hodll64_val;
++        WCHAR val_buf[64];
++        hodll64_val.Length = 0;
++        hodll64_val.MaximumLength = sizeof(val_buf) - sizeof(WCHAR);
++        hodll64_val.Buffer = val_buf;
++        if (!RtlQueryEnvironmentVariable_U( NULL, &hodll64, &hodll64_val ) && hodll64_val.Length)
++        {
++            ULONG dirlen = wcslen( L"C:\\windows\\system32\\" );
++            ULONG size = sizeof(module) - (dirlen + 1) * sizeof(WCHAR);
++            memset( module + dirlen, 0, size );
++            memcpy( module + dirlen, val_buf, min( hodll64_val.Length, size ) );
++        }
++    }
++
+     InitializeObjectAttributes( &attr, &nameW, OBJ_CASE_INSENSITIVE, 0, NULL );
+     if (!NtOpenKey( &key, KEY_READ | KEY_WOW64_64KEY, &attr ))
+     {
+diff --git a/dlls/wow64/syscall.c b/dlls/wow64/syscall.c
+index 0508f4a..3058a1b 100644
+--- a/dlls/wow64/syscall.c
++++ b/dlls/wow64/syscall.c
+@@ -749,6 +749,7 @@ static HMODULE load_64bit_module( const WCHAR *name )
+ static const WCHAR *get_cpu_dll_name(void)
+ {
+     static ULONG buffer[32];
++    static WCHAR cpu_dll[64];
+     KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+     OBJECT_ATTRIBUTES attr;
+     UNICODE_STRING nameW;
+@@ -760,6 +761,21 @@ static const WCHAR *get_cpu_dll_name(void)
+     {
+     case IMAGE_FILE_MACHINE_I386:
+         RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Wow64\\x86" );
++        /* HODLL env var: override 32-bit wow64 CPU DLL at runtime */
++        {
++            UNICODE_STRING hodll = RTL_CONSTANT_STRING( L"HODLL" );
++            UNICODE_STRING hodll_val;
++            WCHAR val_buf[64];
++            hodll_val.Length = 0;
++            hodll_val.MaximumLength = sizeof(val_buf) - sizeof(WCHAR);
++            hodll_val.Buffer = val_buf;
++            if (!RtlQueryEnvironmentVariable_U( NULL, &hodll, &hodll_val ) && hodll_val.Length)
++            {
++                memcpy( cpu_dll, val_buf, hodll_val.Length );
++                cpu_dll[hodll_val.Length / sizeof(WCHAR)] = 0;
++                return cpu_dll;
++            }
++        }
+         ret = (native_machine == IMAGE_FILE_MACHINE_ARM64 ? L"libwow64fex.dll" : L"wow64cpu.dll");
+         break;
+     case IMAGE_FILE_MACHINE_ARMNT:
