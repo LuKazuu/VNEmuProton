@@ -36,7 +36,7 @@ enable_amd_ags_x64=no
 --with-wine-tools=$TERMUX_PKG_HOSTBUILD_DIR
 --enable-nls
 --disable-tests
---with-alsa
+--without-alsa
 --without-capi
 --without-coreaudio
 --without-cups
