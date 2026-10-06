@@ -335,10 +335,14 @@ jobs:
         run: |
           PKG_DIR="termux-packages/x11-packages/proton-termux"
           mkdir -p "$PKG_DIR"
-          rm -fv $PKG_DIR/*.patch $PKG_DIR/*.patch.beforehostbuild $PKG_DIR/build.sh 2>/dev/null || true
+          rm -fv $PKG_DIR/*.patch $PKG_DIR/*.patch.beforehostbuild $PKG_DIR/build.sh $PKG_DIR/*.subpackage.sh 2>/dev/null || true
           cp -v build.sh "$PKG_DIR/build.sh"
           for p in patches/*.patch patches/*.patch.beforehostbuild; do
             [ -f "$p" ] && cp -v "$p" "$PKG_DIR/$(basename "$p")"
+          done
+          # Copy subpackage definitions (creates separate .deb files for FEX/box64 DLLs)
+          for s in patches/*.subpackage.sh; do
+            [ -f "$s" ] && cp -v "$s" "$PKG_DIR/$(basename "$s")"
           done
           mkdir -p "$PKG_DIR/fex-dlls" && cp -v fexcore-dlls/*.dll "$PKG_DIR/fex-dlls/"
           # Copy android/ dir (needed by FSYNC patches — shm_utils.h include)
