@@ -1,0 +1,249 @@
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index f8aa468..0f5eba0 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -1735,6 +1735,86 @@ done:
+ }
+ 
+ 
++
++/***********************************************************************
++ *           load_unixlib_by_name
++ *
++ * Load a unixlib .so by its NT name (e.g. L"winepulse.drv") without
++ * going through the PE builtin-module table.  Used by the
++ * MemoryWineLoadUnixLibByName case of NtQueryVirtualMemory so that
++ * DLLs which lazily load a unixlib at runtime (instead of at PE-load
++ * time) can do so without a matching PE module.
++ *
++ * Ported from Wine 11.18 dlls/ntdll/unix/loader.c.
++ */
++NTSTATUS load_unixlib_by_name( const UNICODE_STRING *nt_name, void **handle_ret )
++{
++    unsigned int i, pos, maxlen = 0;
++    unsigned int len = nt_name->Length / sizeof(WCHAR);
++    const char *so_dir = get_so_dir( current_machine );
++    char *ptr = NULL, *file, *ext = NULL;
++    void *handle = NULL;
++
++    if (!len) return STATUS_DLL_NOT_FOUND;
++
++    for (i = 0; i < len; i++) if (nt_name->Buffer[i] == '/' || nt_name->Buffer[i] == '\\') break;
++
++    if (i < len)  /* explicit path */
++    {
++        UNICODE_STRING true_nt_name;
++        OBJECT_ATTRIBUTES attr;
++
++        InitializeObjectAttributes( &attr, (UNICODE_STRING *)nt_name, 0, 0, NULL );
++        if (!get_nt_and_unix_names( &attr, &true_nt_name, &file, FILE_OPEN, FALSE ))
++            handle = dlopen( file, RTLD_NOW );
++        free( true_nt_name.Buffer );
++        goto done;
++    }
++
++    if (build_dir) maxlen = strlen(build_dir) + sizeof("/dlls/") + len;
++    maxlen = max( maxlen, dll_path_maxlen + 1 ) + len + sizeof("/aarch64-unix") + sizeof(".so");
++
++    if (!(file = malloc( maxlen ))) return STATUS_NO_MEMORY;
++
++    pos = maxlen - len - 4;
++    ext = file + pos + len;
++    /* we don't want to depend on the current codepage here */
++    for (i = 0; i < len; i++)
++    {
++        if (nt_name->Buffer[i] > 127) goto done;
++        file[pos + i] = (char)nt_name->Buffer[i];
++        if (file[pos + i] >= 'A' && file[pos + i] <= 'Z') file[pos + i] += 'a' - 'A';
++        else if (file[pos + i] == '.') ext = file + pos + i;
++    }
++    file[pos + len] = 0;
++    file[--pos] = '/';
++
++    if (build_dir)
++    {
++        ptr = prepend_build_dir_path( file + pos, ".so", "", "/dlls", build_dir );
++        strcpy( ext, ".so" );
++        if ((handle = dlopen( ptr, RTLD_NOW ))) goto done;
++    }
++
++    strcpy( ext, ".so" );
++    for (i = 0; dll_paths[i]; i++)
++    {
++        ptr = prepend( file + pos, so_dir, strlen(so_dir) );
++        ptr = prepend( ptr, dll_paths[i], strlen(dll_paths[i]) );
++        if ((handle = dlopen( ptr, RTLD_NOW ))) goto done;
++
++        ptr = prepend( file + pos, dll_paths[i], strlen(dll_paths[i]) );
++        if ((handle = dlopen( ptr, RTLD_NOW ))) goto done;
++    }
++
++done:
++    free( file );
++    if (!handle) return STATUS_DLL_NOT_FOUND;
++    *handle_ret = handle;
++    return STATUS_SUCCESS;
++}
++
++
+ /***********************************************************************
+  *           load_builtin
+  *
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index 2f649ca..4cab512 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -333,6 +333,7 @@ extern void virtual_fill_image_information( const struct pe_image_info *pe_info,
+                                             SECTION_IMAGE_INFORMATION *info );
+ extern void *get_builtin_so_handle( void *module );
+ extern NTSTATUS load_builtin_unixlib( void *module, const char *name );
++extern NTSTATUS load_unixlib_by_name( const UNICODE_STRING *nt_name, void **handle_ret );
+ 
+ extern NTSTATUS get_thread_ldt_entry( HANDLE handle, THREAD_DESCRIPTOR_INFORMATION *info, ULONG len );
+ extern void *get_native_context( CONTEXT *context );
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index d5b9341..14addc1 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -1047,6 +1047,23 @@ NTSTATUS load_builtin_unixlib( void *module, const char *name )
+ }
+ 
+ 
++/***********************************************************************
++ *           get_unixlib_funcs
++ *
++ * Resolve the __wine_unix_call_funcs / __wine_unix_call_wow64_funcs
++ * (or the legacy __wine_unix_lib_init entry point) from a dlopen() handle.
++ * Used by the MemoryWineLoadUnixLibByName case of NtQueryVirtualMemory.
++ *
++ * Ported from Wine 11.18 dlls/ntdll/unix/virtual.c.
++ */
++static NTSTATUS get_unixlib_funcs( void *so_handle, BOOL wow, const void **funcs, NTSTATUS (**entry)(void) )
++{
++    *funcs = dlsym( so_handle, wow ? "__wine_unix_call_wow64_funcs" : "__wine_unix_call_funcs" );
++    if (!*funcs) *entry = dlsym( so_handle, "__wine_unix_lib_init" );
++    return *funcs || *entry ? STATUS_SUCCESS : STATUS_ENTRYPOINT_NOT_FOUND;
++}
++
++
+ /***********************************************************************
+  *           free_ranges_lower_bound
+  *
+@@ -6603,6 +6620,52 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
+             }
+             return STATUS_INVALID_HANDLE;
+ 
++        case MemoryWineLoadUnixLib:
++        case MemoryWineLoadUnixLibWow64:
++            if (len != sizeof(unixlib_handle_t)) return STATUS_INFO_LENGTH_MISMATCH;
++            if (process == GetCurrentProcess())
++            {
++                void *module = (void *)addr;
++                const void *funcs = NULL;
++
++                status = get_builtin_unix_funcs( module, info_class == MemoryWineLoadUnixLibWow64, &funcs );
++                if (!status) *(unixlib_handle_t *)buffer = (UINT_PTR)funcs;
++                return status;
++            }
++            return STATUS_INVALID_HANDLE;
++
++        case MemoryWineLoadUnixLibByName:
++        case MemoryWineLoadUnixLibByNameWow64:
++            if (process == GetCurrentProcess())
++            {
++                UINT64 res[2];
++                const UNICODE_STRING *name = addr;
++                NTSTATUS (*entry)(void) = NULL;
++                const void *funcs;
++                void *handle;
++
++                if ((status = load_unixlib_by_name( name, &handle ))) return status;
++                res[0] = (UINT_PTR)handle;
++                if (!(status = get_unixlib_funcs( handle, info_class == MemoryWineLoadUnixLibByNameWow64,
++                                                  &funcs, &entry )))
++                {
++                    res[1] = (UINT_PTR)funcs;
++                    if (entry) status = entry();
++                }
++                if (status) dlclose( handle );
++                else memcpy( buffer, res, min( len, sizeof(res) ));
++                return status;
++            }
++            return STATUS_INVALID_HANDLE;
++
++        case MemoryWineUnloadUnixLib:
++            if (process == GetCurrentProcess())
++            {
++                const unixlib_module_t *handle = addr;
++                if (!dlclose( (void *)(UINT_PTR)*handle )) return STATUS_SUCCESS;
++            }
++            return STATUS_INVALID_HANDLE;
++
+         default:
+             FIXME("(%p,%p,info_class=%d,%p,%ld,%p) Unknown information class\n",
+                   process, addr, info_class, buffer, len, res_len);
+diff --git a/dlls/winecrt0/unix_lib.c b/dlls/winecrt0/unix_lib.c
+index ebf6594..e042431 100644
+--- a/dlls/winecrt0/unix_lib.c
++++ b/dlls/winecrt0/unix_lib.c
+@@ -94,3 +94,22 @@ NTSTATUS WINAPI __wine_init_unix_call(void)
+     return NtQueryVirtualMemory( GetCurrentProcess(), image_base(), MemoryWineUnixFuncs,
+                                  &__wine_unixlib_handle, sizeof(__wine_unixlib_handle), NULL );
+ }
++
++NTSTATUS WINAPI __wine_load_unix_lib( const UNICODE_STRING *name, unixlib_module_t *lib,
++                                      unixlib_handle_t *handle )
++{
++    UINT64 res[2];
++    NTSTATUS status = NtQueryVirtualMemory( GetCurrentProcess(), name, MemoryWineLoadUnixLibByName,
++                                            res, handle ? sizeof(res) : sizeof(res[0]), NULL );
++    if (!status)
++    {
++        if (lib) *lib = res[0];
++        if (handle) *handle = res[1];
++    }
++    return status;
++}
++
++NTSTATUS WINAPI __wine_unload_unix_lib( unixlib_module_t lib )
++{
++    return NtQueryVirtualMemory( GetCurrentProcess(), &lib, MemoryWineUnloadUnixLib, NULL, 0, NULL );
++}
+diff --git a/include/wine/unixlib.h b/include/wine/unixlib.h
+index 364625b..77f9c7c 100644
+--- a/include/wine/unixlib.h
++++ b/include/wine/unixlib.h
+@@ -28,6 +28,7 @@
+ #include <winternl.h>
+ 
+ typedef UINT64 unixlib_handle_t;
++typedef UINT64 unixlib_module_t;
+ 
+ #ifdef WINE_UNIX_LIB
+ 
+@@ -274,6 +275,9 @@ NTSYSAPI int ntdll_wcsnicmp( const WCHAR *str1, const WCHAR *str2, int n );
+ extern unixlib_handle_t __wine_unixlib_handle;
+ extern NTSTATUS (WINAPI *__wine_unix_call_dispatcher)( unixlib_handle_t, unsigned int, void * );
+ extern NTSTATUS WINAPI __wine_init_unix_call(void);
++extern NTSTATUS WINAPI __wine_load_unix_lib( const UNICODE_STRING *name, unixlib_module_t *lib,
++                                             unixlib_handle_t *handle );
++extern NTSTATUS WINAPI __wine_unload_unix_lib( unixlib_module_t lib );
+ 
+ #ifdef __arm64ec__
+ NTSTATUS __wine_unix_call_arm64ec( unixlib_handle_t handle, unsigned int code, void *args );
+diff --git a/include/winternl.h b/include/winternl.h
+index a7ba1c1..7f3445b 100644
+--- a/include/winternl.h
++++ b/include/winternl.h
+@@ -2459,6 +2459,11 @@ typedef enum _MEMORY_INFORMATION_CLASS {
+ #ifdef __WINESRC__
+     MemoryWineUnixFuncs = 1000,
+     MemoryWineUnixWow64Funcs,
++    MemoryWineLoadUnixLib,
++    MemoryWineLoadUnixLibWow64,
++    MemoryWineLoadUnixLibByName,
++    MemoryWineLoadUnixLibByNameWow64,
++    MemoryWineUnloadUnixLib,
+ #endif
+ } MEMORY_INFORMATION_CLASS;
+ 
