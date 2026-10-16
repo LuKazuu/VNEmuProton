@@ -104,7 +104,7 @@ _setup_llvm_mingw_toolchain() {
 
 termux_step_post_get_source() {
         # Copy android/shm_utils/ into the source tree right after extraction.
-        # The FSYNC patches include "../../../android/shm_utils/shm_utils.h" from
+        # The esync/fsync patch includes "../../../android/shm_utils/shm_utils.h" from
         # dlls/ntdll/unix/fsync.c and server/fsync.c. This needs to be in the
         # source tree BEFORE any configure/makedep runs (both host and cross).
         if [ -d "${TERMUX_PKG_BUILDER_DIR}/android" ]; then
@@ -134,7 +134,7 @@ termux_step_pre_configure() {
         # alphabetical order) BEFORE this function runs. The .beforehostbuild
         # patches were applied before termux_step_host_build, which ran
         # autogen.sh. But the regular .patch files (including
-        # server_protocol_def.patch which adds the ESYNC enum) are applied
+        # esync-fsync-combined.patch which adds the ESYNC enum) are applied
         # AFTER the host build. So we need to re-run autogen.sh here to
         # regenerate server_protocol.h with the ESYNC enum.
         (cd "$TERMUX_PKG_SRCDIR" && bash autogen.sh)
