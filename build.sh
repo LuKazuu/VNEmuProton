@@ -1,14 +1,14 @@
-# build.sh — Termux package recipe for VNEmuProton (Proton 11.0 for Termux)
+# build.sh — Termux package recipe for VNEmuProton (Proton bleeding-edge for Termux)
 #
 # Same build flow and flags as LuKazuu/VNEmuWine, but built from
-# ValveSoftware/wine proton_11.0 with the proton-native patch overlay.
+# ValveSoftware/wine bleeding-edge with the proton-native patch overlay.
 TERMUX_PKG_HOMEPAGE=https://github.com/ValveSoftware/Proton
-TERMUX_PKG_DESCRIPTION="VNEmuProton — Valve Proton 11.0 (Wine fork) for Termux"
+TERMUX_PKG_DESCRIPTION="VNEmuProton — Valve Proton bleeding-edge (Wine fork) for Termux"
 TERMUX_PKG_LICENSE="LGPL-2.1"
 TERMUX_PKG_MAINTAINER="@LuKazuu"
-TERMUX_PKG_VERSION="11.0"
+TERMUX_PKG_VERSION="bleeding-edge"
 TERMUX_PKG_REVISION=1
-TERMUX_PKG_SRCURL="https://github.com/ValveSoftware/wine/archive/refs/heads/proton_11.0.tar.gz"
+TERMUX_PKG_SRCURL="https://github.com/ValveSoftware/wine/archive/refs/heads/bleeding-edge.tar.gz"
 TERMUX_PKG_SHA256="__PROTON_SHA256__"
 TERMUX_PKG_DEPENDS="fontconfig, freetype, krb5, libandroid-spawn, libc++, libgmp, libgnutls, libxcb, libxcomposite, libxcursor, libxfixes, libxrender, opengl, pulseaudio, sdl2, vulkan-loader, xorg-xrandr"
 TERMUX_PKG_BUILD_DEPENDS="libandroid-spawn-static, vulkan-loader-generic"
@@ -115,7 +115,7 @@ termux_step_post_get_source() {
 termux_step_host_build() {
         _setup_llvm_mingw_toolchain
 
-        # The proton_11.0 branch doesn't ship a pre-generated configure script.
+        # The bleeding-edge branch doesn't ship a pre-generated configure script.
         # Run autogen.sh to generate it (same as proton-native's flow —
         # autogen.sh runs tools/make_requests, tools/make_specfiles,
         # dlls/winevulkan/make_vulkan, then autoreconf -ifv).
@@ -154,7 +154,7 @@ termux_step_pre_configure() {
         local _balanced_flags="-Oz -g1 -fno-lto -ffunction-sections -fdata-sections -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES -Wno-declaration-after-statement -Wno-implicit-function-declaration -Wno-int-conversion"
         CFLAGS+=" $_balanced_flags"
         CXXFLAGS+=" $_balanced_flags"
-        # PE cross-compile side: same -Wno flags as ELF side — proton_11.0's
+        # PE cross-compile side: same -Wno flags as ELF side — bleeding-edge's
         # sqlite3.c calls _ReadWriteBarrier() which is undeclared under clang.
         export CROSSCFLAGS="${CROSSCFLAGS:-} -Oz -g1 -fno-lto -ffunction-sections -fdata-sections -Wno-implicit-function-declaration"
         export CROSSLDFLAGS="${CROSSLDFLAGS:-}"
