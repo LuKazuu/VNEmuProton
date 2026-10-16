@@ -265,8 +265,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Wine (full VNEmuProton .deb) — depends on fexcore + box64
-  # Builds Valve Proton 11.0 (proton_11.0 branch) for Termux/aarch64.
-  # The output is a proton-termux_11.0_aarch64.deb (same package name as
+  # Builds Valve Proton bleeding-edge for Termux/aarch64.
+  # The output is a proton-termux_bleeding-edge_aarch64.deb (same package name as
   # VNEmuWine for drop-in compatibility).
   # ---------------------------------------------------------------------------
   build-wine:
@@ -304,9 +304,9 @@ jobs:
             [ -f "fexcore-dlls/$dll" ] || { echo "::error::$dll missing"; exit 1; }
           done
 
-      - name: Download Proton source (ValveSoftware/wine proton_11.0 branch)
+      - name: Download Proton source (ValveSoftware/wine bleeding-edge branch)
         run: |
-          wget -q "https://github.com/ValveSoftware/wine/archive/refs/heads/proton_11.0.tar.gz" -O /tmp/wine.tar.gz
+          wget -q "https://github.com/ValveSoftware/wine/archive/refs/heads/bleeding-edge.tar.gz" -O /tmp/wine.tar.gz
           echo "wine_sha=$(sha256sum /tmp/wine.tar.gz | cut -d' ' -f1)" >> "$GITHUB_ENV"
 
       - name: Verify wine patches (alphabetical order, patch -p1 — matches Termux builder)
@@ -401,7 +401,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: vnemuproton-aarch64-11.0
+          name: vnemuproton-aarch64-bleeding-edge
           path: artifacts/
           retention-days: 30
           if-no-files-found: warn
@@ -411,8 +411,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="vnemuproton-11.0-r${{ github.run_number }}"
-          echo "VNEmuProton 11.0 (Valve Proton 11.0 for Termux)" > /tmp/notes.md
-          gh release create "$TAG" --title "VNEmuProton 11.0" --notes-file /tmp/notes.md --repo "${{ github.repository }}" || true
+          TAG="vnemuproton-bleeding-edge-r${{ github.run_number }}"
+          echo "VNEmuProton bleeding-edge (Valve Proton bleeding-edge for Termux)" > /tmp/notes.md
+          gh release create "$TAG" --title "VNEmuProton bleeding-edge" --notes-file /tmp/notes.md --repo "${{ github.repository }}" || true
           # Upload all .deb files (main proton-termux + subpackages: libarm64ecfex, libwow64fex, wowbox64)
           for deb in artifacts/*.deb; do [ -f "$deb" ] && gh release upload "$TAG" "$deb" --repo "${{ github.repository }}" --clobber; done
