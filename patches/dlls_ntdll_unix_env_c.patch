@@ -1,11 +1,10 @@
-diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
-index 042daa2..8c0dcae 100644
 --- a/dlls/ntdll/unix/env.c
 +++ b/dlls/ntdll/unix/env.c
-@@ -85,6 +85,43 @@ static WCHAR *nt_data_dir;
+@@ -85,6 +85,44 @@
  static char system_locale[LOCALE_NAME_MAX_LENGTH];
  static char user_locale[LOCALE_NAME_MAX_LENGTH];
  
++
 +#ifdef __ANDROID__
 +static BOOL is_bionic_no_locale( const char *locale )
 +{
@@ -46,7 +45,7 @@ index 042daa2..8c0dcae 100644
  /* system directory with trailing backslash */
  const WCHAR system_dir[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
                              's','y','s','t','e','m','3','2','\\',0};
-@@ -643,10 +680,18 @@ static BOOL unix_to_win_locale( const char *unix_name, char *win_name )
+@@ -644,10 +682,18 @@
      char buffer[LOCALE_NAME_MAX_LENGTH];
      char *p, *country = NULL, *modifier = NULL;
  
@@ -67,7 +66,7 @@ index 042daa2..8c0dcae 100644
      }
  
      if (strlen( unix_name ) >= LOCALE_NAME_MAX_LENGTH) return FALSE;
-@@ -729,20 +774,36 @@ static const NLS_LOCALE_DATA *get_win_locale( const NLS_LOCALE_HEADER *header, c
+@@ -730,22 +776,57 @@
  static void init_locale(void)
  {
      struct locale_nls_header *header;
@@ -101,21 +100,21 @@ index 042daa2..8c0dcae 100644
      if (!unix_to_win_locale( ctype, system_locale )) system_locale[0] = 0;
      TRACE_(nls)( "Unix LC_CTYPE is %s, setting system locale to %s\n", debugstr_a(ctype), debugstr_a(user_locale) );
 +#endif
- 
-     if (main_argc > 1 && (
-             strstr(main_argv[1], "start_protected_game.exe")
-@@ -751,11 +812,20 @@ static void init_locale(void)
-        ))
-     {
-         FIXME( "HACK setting EN locale.\n" );
 +#ifdef __ANDROID__
++    /* Bionic libc doesn't honour setlocale(); we look up the locale via env
++     * vars ourselves (see get_android_locale above). We also replicate the
++     * start_protected_game.exe / RocketLeague_EAC.exe en-US HACK that
++     * upstream wine had in proton_11.0 but removed in bleeding-edge --
++     * keeping it for Android only so games that rely on it still work. */
++    if (main_argc > 1 && (
++            strstr(main_argv[1], "start_protected_game.exe")
++            || strstr(main_argv[1], "RocketLeague_EAC.exe")
++            || ((p = getenv( "SteamGameId" )) && !strcmp( p, "2221490" ) && !strcmp( main_argv[1], "-public_key_store_address" ))
++       ))
++    {
++        FIXME( "HACK setting EN locale.\n" );
 +        messages_android = "en-US";
-+#else
-         messages = "en-US";
-+#endif
-     }
- 
-+#ifdef __ANDROID__
++    }
 +    if (!unix_to_win_locale( messages_android, user_locale )) user_locale[0] = 0;
 +    TRACE_(nls)( "Unix LC_MESSAGES is %s, user system locale to %s\n", debugstr_a(messages_android), debugstr_a(user_locale) );
 +#else
