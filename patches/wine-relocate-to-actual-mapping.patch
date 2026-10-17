@@ -1,0 +1,39 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 3efac71..ced36a6 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -3273,6 +3273,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+     SIZE_T header_size, header_map_size, total_size = view->size;
+     SIZE_T align_mask = max( image_info->alignment - 1, page_mask );
+     INT_PTR delta;
++    ULONG_PTR reloc_base;
+ 
+     TRACE_(module)( "mapping PE file %s at %p-%p\n", debugstr_us(nt_name), ptr, ptr + total_size );
+ 
+@@ -3443,15 +3444,22 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+ 
+     /* relocate to dynamic base */
+ 
+-    if (image_info->map_addr && (delta = image_info->map_addr - image_info->base))
++    /* If the view could not be placed at the server-assigned map address, relocate to the
++     * address it was really mapped at. Otherwise ntdll's loader relocates the image a second time
++     * through NtProtectVirtualMemory(PAGE_READWRITE), and FEX then keeps the code pages marked as
++     * DEP-promoted, trapping them as PAGE_READONLY (non-executable as seen by the guest). */
++    reloc_base = image_info->map_addr;
++    if (reloc_base && (ULONG_PTR)ptr != reloc_base) reloc_base = (ULONG_PTR)ptr;
++
++    if (reloc_base && (delta = reloc_base - image_info->base))
+     {
+         TRACE_(module)( "relocating %s dynamic base %lx -> %lx mapped at %p\n", debugstr_us(nt_name),
+-                        (ULONG_PTR)image_info->base, (ULONG_PTR)image_info->map_addr, ptr );
++                        (ULONG_PTR)image_info->base, reloc_base, ptr );
+ 
+         if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+-            ((IMAGE_NT_HEADERS64 *)nt)->OptionalHeader.ImageBase = image_info->map_addr;
++            ((IMAGE_NT_HEADERS64 *)nt)->OptionalHeader.ImageBase = reloc_base;
+         else
+-            ((IMAGE_NT_HEADERS32 *)nt)->OptionalHeader.ImageBase = image_info->map_addr;
++            ((IMAGE_NT_HEADERS32 *)nt)->OptionalHeader.ImageBase = (DWORD)reloc_base;
+ 
+         if ((dir = get_data_dir( nt, total_size, IMAGE_DIRECTORY_ENTRY_BASERELOC )))
+         {
