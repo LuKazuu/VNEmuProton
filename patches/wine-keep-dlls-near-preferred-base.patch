@@ -1,0 +1,29 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 3efac71..2cc87ad 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -3586,6 +3586,24 @@ static NTSTATUS map_image_view( struct file_view **view_ret, struct pe_image_inf
+         if (!status) return status;
+     }
+ 
++    /* If the preferred base could not be mapped (the host may already have something there),
++     * stay in its neighbourhood instead of jumping to the very top of the address space. The top is
++     * crowded with host mappings on Android, which leaves hooking code (that allocates trampolines
++     * within +-2GB of a system DLL) with no usable memory. */
++    if (base && image_info->base >= limit_4g && size < 0x40000000)
++    {
++        ULONG_PTR near_high = (ULONG_PTR)base + size - 1;
++        ULONG_PTR near_low = (ULONG_PTR)base > 0x40000000 ? (ULONG_PTR)base - 0x40000000 : 0;
++
++        near_low = max( near_low, max( limit_low, limit_4g ) );
++        if (near_high > limit_high) near_high = limit_high;
++        if (near_low < near_high)
++        {
++            status = map_view( view_ret, NULL, size, MEM_TOP_DOWN, vprot, near_low, near_high, 0 );
++            if (!status) return status;
++        }
++    }
++
+     /* then some appropriate address range */
+ 
+     if (image_info->base >= limit_4g)
